@@ -17,5 +17,4 @@ toolbarMode = "minimal"
 showErrorDetails = false
 
 [server]
-# Elimina el botón de "Made with Streamlit" en el pie de página.
-hideTopBar = true
+toolbarMode = "minimal"
