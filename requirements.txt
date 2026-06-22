@@ -1,0 +1,4 @@
+SQLAlchemy
+google-genai # pip install -q -U google-genai
+python-dotenv
+streamlit
