@@ -10,6 +10,53 @@ load_dotenv()
 
 # Inicializar el cliente moderno (asume que GEMINI_API_KEY está en el entorno)
 client = genai.Client()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+
+
+def _es_error_de_cuota(exception: Exception) -> bool:
+    mensaje = str(exception)
+    return "RESOURCE_EXHAUSTED" in mensaje or "429" in mensaje or "quota" in mensaje.lower()
+
+
+def _fallback_estructura(tipo_trabajo, curso, integrantes):
+    integrantes_validos = [nombre for nombre in integrantes if nombre]
+    if not integrantes_validos:
+        integrantes_validos = ["Sin asignar"]
+
+    secciones = [
+        "Introducción",
+        "Marco Teórico",
+        "Metodología",
+        "Desarrollo",
+        "Resultados",
+        "Conclusiones",
+    ]
+
+    if tipo_trabajo:
+        secciones[0] = f"Introducción al {tipo_trabajo.lower()}"
+    if curso:
+        secciones[1] = f"Contexto de {curso}"
+
+    estructura = []
+    for index, titulo in enumerate(secciones[: max(4, min(len(secciones), len(integrantes_validos) + 2))]):
+        estructura.append(
+            {
+                "titulo": titulo,
+                "asignado_a": integrantes_validos[index % len(integrantes_validos)],
+            }
+        )
+
+    return estructura
+
+
+def _fallback_revisar_texto(texto):
+    return (
+        "No se pudo usar Gemini por cuota agotada. "
+        "Sugerencias rápidas:\n"
+        "1. Verifica que cada idea tenga una oración principal clara.\n"
+        "2. Reemplaza repeticiones y verbos vagos por lenguaje más preciso.\n"
+        "3. Revisa citas, referencias y consistencia con normas APA en todo el texto."
+    )
 
 def generar_estructura_proyecto(tipo_trabajo, curso, integrantes):
     """
@@ -32,7 +79,7 @@ def generar_estructura_proyecto(tipo_trabajo, curso, integrantes):
     
     try:
         response = client.models.generate_content(
-            model='gemini-1.5-flash',
+            model=GEMINI_MODEL,
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
@@ -45,6 +92,8 @@ def generar_estructura_proyecto(tipo_trabajo, curso, integrantes):
     
     except Exception as e:
         print(f"Error en la llamada a la API de IA: {e}")
+        if _es_error_de_cuota(e):
+            return _fallback_estructura(tipo_trabajo, curso, integrantes)
         return []
 
 def revisar_coherencia_texto(texto):
@@ -61,10 +110,12 @@ def revisar_coherencia_texto(texto):
     
     try:
         response = client.models.generate_content(
-            model='gemini-1.5-flash',
+            model=GEMINI_MODEL,
             contents=prompt
         )
         return response.text
     except Exception as e:
         print(f"Error en la revisión de IA: {e}")
+        if _es_error_de_cuota(e):
+            return _fallback_revisar_texto(texto)
         return "No se pudo procesar la revisión en este momento."

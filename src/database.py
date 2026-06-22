@@ -1,63 +1,56 @@
 import os
-from sqlalchemy import create_engine, Column, Integer, String, ForeignKey, DateTime, Text
-from sqlalchemy.orm import declarative_base, relationship, sessionmaker
+from sqlalchemy import create_engine, String, Text, ForeignKey, DateTime
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 from datetime import datetime
+from typing import List, Optional
 
-# Configuración de la base de datos (archivo local en la raíz para el MVP)
-
-# 1. Obtiene la ruta absoluta del archivo actual (src/database.py)
-# 2. Sube un nivel al directorio padre (la carpeta raíz del proyecto)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-# 3. Une la ruta base con el nombre del archivo de la base de datos
 DB_PATH = os.path.join(BASE_DIR, "synkademia.db")
-
 engine = create_engine(f"sqlite:///{DB_PATH}", echo=False)
 
-Base = declarative_base()
+class Base(DeclarativeBase):
+    pass
+
 SessionLocal = sessionmaker(bind=engine)
 
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, unique=True, index=True, nullable=False)
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    username: Mapped[str] = mapped_column(String, unique=True, index=True)
     
-    # Relación bidireccional con las tareas
-    tasks = relationship("Task", back_populates="assignee")
+    tasks: Mapped[List["Task"]] = relationship(back_populates="assignee")
 
 class Project(Base):
     __tablename__ = "projects"
 
-    id = Column(Integer, primary_key=True, index=True)
-    title = Column(String, nullable=False)
-    work_type = Column(String, nullable=False) # ej. Ensayo, Informe, Caso de estudio
-    course = Column(String, nullable=False)
-    deadline = Column(DateTime)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    title: Mapped[str] = mapped_column(String)
+    work_type: Mapped[str] = mapped_column(String) 
+    course: Mapped[str] = mapped_column(String)
+    deadline: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    tasks = relationship("Task", back_populates="project", cascade="all, delete-orphan")
+    tasks: Mapped[List["Task"]] = relationship(back_populates="project", cascade="all, delete-orphan")
 
 class Task(Base):
     __tablename__ = "tasks"
 
-    id = Column(Integer, primary_key=True, index=True)
-    title = Column(String, nullable=False) # ej. "Introducción", "Marco Teórico"
-    status = Column(String, default="pending") # pending, in_progress, completed
-    content = Column(Text, default="") # Almacena el texto co-editado de esta sección
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    title: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String, default="pending") 
+    content: Mapped[Optional[str]] = mapped_column(Text, default="") 
 
-    project_id = Column(Integer, ForeignKey("projects.id"))
-    assignee_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"))
+    assignee_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"))
 
-    project = relationship("Project", back_populates="tasks")
-    assignee = relationship("User", back_populates="tasks")
+    project: Mapped["Project"] = relationship(back_populates="tasks")
+    assignee: Mapped[Optional["User"]] = relationship(back_populates="tasks")
 
 def init_db():
-    """Crea las tablas en la base de datos si no existen."""
     Base.metadata.create_all(bind=engine)
 
 def get_session():
-    """Generador para proveer una sesión transaccional."""
     session = SessionLocal()
     try:
         yield session

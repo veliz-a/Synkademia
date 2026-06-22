@@ -12,7 +12,7 @@ def setup_db():
 setup_db()
 
 # Carga del logo global si el archivo existe
-logo_path = os.path.join("assets", "logo.png")
+logo_path = os.path.join("assets", "logo.svg")
 if os.path.exists(logo_path):
     st.logo(logo_path)
 

@@ -1,0 +1,21 @@
+[theme]
+# Paleta base (Estética Minimalista)
+base="light"
+primaryColor="#1A1A1A"
+backgroundColor="#FFFFFF"
+secondaryBackgroundColor="#F7F9FA"
+textColor="#292929"
+font="sans serif"
+
+[client]
+# Oculta el menú de "Deploy" y opciones de desarrollador en la esquina superior derecha.
+# Reduce la carga cognitiva y hace que la app se sienta como un software propio, no como un prototipo.
+toolbarMode = "minimal"
+
+# Si ocurre un error (ej. la API de Gemini tarda en responder), 
+# muestra un mensaje limpio en lugar de todo el "stack trace" de código fuente.
+showErrorDetails = false
+
+[server]
+# Elimina el botón de "Made with Streamlit" en el pie de página.
+hideTopBar = true
