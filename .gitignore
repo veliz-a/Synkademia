@@ -1,0 +1,9 @@
+# Entornos y secretos locales
+venv
+.env
+.streamlit/secrets.toml
+
+# Caché de Python
+__pycache__/
+*.py[cod]
+*$py.class
