@@ -1,5 +1,5 @@
 SQLAlchemy
 python-dotenv
 streamlit
-ollama pydantic
+ollama
 pdfplumber

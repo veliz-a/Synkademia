@@ -1,5 +1,4 @@
 # Synkademia
-# Synkademia
 
 **Motor de Orquestación y Auditoría de Documentos Académicos**
 
