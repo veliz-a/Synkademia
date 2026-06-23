@@ -2,3 +2,4 @@ SQLAlchemy
 python-dotenv
 streamlit
 ollama pydantic
+pdfplumber

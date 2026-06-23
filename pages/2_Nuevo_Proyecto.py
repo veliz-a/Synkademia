@@ -1,9 +1,9 @@
 import os
-import PyPDF2
+import pdfplumber
 import streamlit as st
-from src.database import get_session, Project, FormatTemplate, ProjectFile, Iteration, User
-# Importaremos estas funciones de tu cliente de IA (las construiremos en el siguiente paso)
-from src.llm.ai_client import generar_mockup_iteraciones, extraer_heuristicas
+from src.database import get_session, Project, FormatTemplate, ProjectFile, Iteration, Task, User
+from src.llm.ai_client import chat
+from src.core.heuristicas import extraer_contexto_integral
 
 st.set_page_config(page_title="Nuevo Proyecto - Synkademia", layout="centered")
 
@@ -11,12 +11,12 @@ if not st.session_state.get("authenticated"):
     st.error("Acceso denegado. Por favor, inicia sesión.")
     st.stop()
 
+# Inicialización de la máquina de estados del Wizard
 if "wizard_step" not in st.session_state:
     st.session_state["wizard_step"] = 1
 if "draft_project" not in st.session_state:
     st.session_state["draft_project"] = {}
 if "team_inputs" not in st.session_state:
-    # Se inicia con un campo vacío para invitar compañeros
     st.session_state["team_inputs"] = [""]
 
 def next_step(): st.session_state["wizard_step"] += 1
@@ -39,25 +39,26 @@ if st.session_state["wizard_step"] == 1:
     
     formatos_db = db.query(FormatTemplate).all()
     nombres_formatos = [f.name for f in formatos_db] if formatos_db else ["APA 7"]
-    formato = st.selectbox("Formato de Redacción", nombres_formatos)
+    formato = st.selectbox("Formato de Redacción Exigido", nombres_formatos)
     
     st.markdown("### Integrantes del Equipo")
-    st.caption("Tu usuario ya está incluido. Añade el username exacto de tus compañeros.")
+    st.caption("Tu usuario ya está incluido. Añade el nombre de usuario exacto de tus compañeros.")
     
-    # Renderizado dinámico de casillas
     for i in range(len(st.session_state["team_inputs"])):
-        st.session_state["team_inputs"][i] = st.text_input(f"Compañero {i+1}", value=st.session_state["team_inputs"][i], key=f"team_{i}")
+        st.session_state["team_inputs"][i] = st.text_input(
+            f"Compañero {i+1}", 
+            value=st.session_state["team_inputs"][i], 
+            key=f"team_input_{i}"
+        )
         
-    if st.button("Añadir otro compañero"):
+    if st.button("Añadir casilla de integrante"):
         st.session_state["team_inputs"].append("")
         st.rerun()
         
     if st.button("Siguiente"):
         if titulo and curso:
-            # Limpiar lista de vacíos
             usernames_solicitados = [u.strip() for u in st.session_state["team_inputs"] if u.strip()]
             
-            # Validación en Base de Datos
             usuarios_encontrados = []
             if usernames_solicitados:
                 usuarios_encontrados = db.query(User).filter(User.username.in_(usernames_solicitados)).all()
@@ -65,13 +66,10 @@ if st.session_state["wizard_step"] == 1:
                 
                 faltantes = set(usernames_solicitados) - set(nombres_encontrados)
                 if faltantes:
-                    st.error(f"Los siguientes usuarios no existen en el sistema: {', '.join(faltantes)}")
+                    st.error(f"Los siguientes usuarios no existen: {', '.join(faltantes)}")
                     st.stop()
             
-            # Failsafe: Trabajo individual
             is_solo = len(usuarios_encontrados) == 0
-            
-            # Recolectar IDs (Incluyendo al creador)
             team_ids = [st.session_state["user_id"]] + [u.id for u in usuarios_encontrados]
             
             st.session_state["draft_project"].update({
@@ -84,18 +82,21 @@ if st.session_state["wizard_step"] == 1:
             next_step()
             st.rerun()
         else:
-            st.warning("Completa el título y el curso.")
+            st.warning("El título y el curso son campos obligatorios.")
 
 # ==========================================
-# PASO 2: FASES Y EXTRACCIÓN DE CONTEXTO
+# PASO 2: CARGA OBLIGATORIA DE CONTEXTO
 # ==========================================
 elif st.session_state["wizard_step"] == 2:
-    st.subheader("Paso 2: Iteraciones y Reglas")
+    st.subheader("Paso 2: Documento de Contexto")
+    st.markdown("Para garantizar la auditoría inteligente, es obligatorio subir la rúbrica, sílabo o guía del proyecto.")
     
-    num_fases = st.number_input("Cantidad de fases o entregables", min_value=1, max_value=10, value=st.session_state["draft_project"].get("num_fases", 1))
+    archivo_contexto = st.file_uploader("Sube el documento guía (PDF)", type=["pdf"])
     
-    st.markdown("Si el proyecto tiene múltiples fases, **es obligatorio** subir la rúbrica o sílabo para que el motor IA procese el contexto.")
-    archivo_contexto = st.file_uploader("Sube el documento de contexto (PDF)", type=["pdf"])
+    requiere_fases = st.checkbox(
+        "Deseo estructurar el desarrollo del proyecto en múltiples fases o iteraciones de entrega", 
+        value=st.session_state["draft_project"].get("requiere_fases", True)
+    )
     
     col1, col2 = st.columns([1, 4])
     with col1:
@@ -103,84 +104,118 @@ elif st.session_state["wizard_step"] == 2:
             prev_step()
             st.rerun()
     with col2:
-        if st.button("Procesar Contexto", type="primary"):
-            if num_fases > 1 and not archivo_contexto:
-                st.error("Requisito faltante: Sube el archivo de contexto para procesar múltiples iteraciones.")
+        if st.button("Procesar con Auditor IA", type="primary"):
+            if not archivo_contexto:
+                st.error("Debe proporcionar un archivo de contexto para continuar.")
             else:
-                st.session_state["draft_project"]["num_fases"] = num_fases
+                temp_dir = os.path.join("data", "uploads", "temp")
+                os.makedirs(temp_dir, exist_ok=True)
+                temp_path = os.path.join(temp_dir, archivo_contexto.name)
                 
-                if archivo_contexto:
-                    temp_dir = os.path.join("data", "uploads", "temp")
-                    os.makedirs(temp_dir, exist_ok=True)
-                    temp_path = os.path.join(temp_dir, archivo_contexto.name)
-                    
-                    with open(temp_path, "wb") as f:
-                        f.write(archivo_contexto.getbuffer())
-                    
-                    # Extracción real de texto con PyPDF2
-                    texto_extraido = ""
+                with open(temp_path, "wb") as f:
+                    f.write(archivo_contexto.getbuffer())
+                
+                texto_extraido = ""
+                with st.spinner("Extrayendo texto del documento..."):
                     try:
-                        reader = PyPDF2.PdfReader(temp_path)
-                        for page in reader.pages:
-                            texto_extraido += page.extract_text() + "\n"
+                        with pdfplumber.open(temp_path) as pdf:
+                            for page in pdf.pages:
+                                text = page.extract_text()
+                                if text:
+                                    texto_extraido += text + "\n"
                     except Exception as e:
-                        st.error("No se pudo leer el PDF. Asegúrate de que no esté encriptado.")
+                        st.error(f"Error al leer el archivo PDF: {e}")
                         st.stop()
-                    
-                    st.session_state["draft_project"]["context_file"] = {
+                
+                if not texto_extraido.strip():
+                    st.error("El PDF no contiene texto extraíble (podría ser una imagen).")
+                    st.stop()
+                
+                st.session_state["draft_project"].update({
+                    "requiere_fases": requiere_fases,
+                    "context_file": {
                         "name": archivo_contexto.name,
                         "path": temp_path,
                         "extracted_text": texto_extraido.strip()
                     }
-                
+                })
                 next_step()
                 st.rerun()
 
 # ==========================================
-# PASO 3: PROPUESTA IA Y CONSOLIDACIÓN
+# PASO 3: COTEJO DE HEURÍSTICAS Y CONFIRMACIÓN
 # ==========================================
 elif st.session_state["wizard_step"] == 3:
-    st.subheader("Paso 3: Auditoría y Estructura Propuesta")
+    st.subheader("Paso 3: Validación de Heurísticas y Estructura")
     
     texto_contexto = st.session_state["draft_project"].get("context_file", {}).get("extracted_text", "")
-    num_fases = st.session_state["draft_project"]["num_fases"]
+    requiere_fases = st.session_state["draft_project"]["requiere_fases"]
     
-    # Invocación simulada a la IA (Solo corre una vez por sesión en este paso)
-    if "ai_proposal" not in st.session_state["draft_project"]:
-        with st.spinner("La IA está leyendo el contexto y estructurando las fases..."):
-            # Aquí se conecta con ai_client.py. Devuelve un dict con nombres propuestos.
-            propuesta_fases = generar_mockup_iteraciones(texto_contexto, num_fases)
-            heuristicas = extraer_heuristicas(texto_contexto)
-            
-            st.session_state["draft_project"]["ai_proposal"] = propuesta_fases
-            st.session_state["draft_project"]["ai_heuristics"] = heuristicas
+    # Ejecución única del análisis del modelo por sesión en este paso
+    if "ai_analysis" not in st.session_state["draft_project"]:
+        with st.spinner("El modelo local está auditando el documento..."):
+            analisis = extraer_contexto_integral(texto_contexto, requiere_fases=requiere_fases)
+            st.session_state["draft_project"]["ai_analysis"] = analisis
 
-    propuesta = st.session_state["draft_project"]["ai_proposal"]
+    analisis = st.session_state["draft_project"]["ai_analysis"]
     
-    st.success("Contexto procesado exitosamente.")
+    # 1. Visualización de Estilos de Reducción según la Base de Datos
+    formato_nombre = st.session_state["draft_project"]["format"]
+    formato_template = db.query(FormatTemplate).filter_by(name=formato_nombre).first()
     
-    if st.session_state["draft_project"]["is_solo"]:
-        st.info("Modo individual detectado: Las tareas se asignarán automáticamente a ti.")
+    st.markdown(f"### Estilos Determinados del Documento ({formato_nombre})")
+    if formato_template and isinstance(formato_template.style_rules, dict):
+        rules = formato_template.style_rules
+        st.markdown(f"- **Fuentes y Tamaño:** {rules.get('font', 'No definido')}")
+        st.markdown(f"- **Estructura H1:** {rules.get('h1', 'No definido')}")
+        st.markdown(f"- **Márgenes:** {rules.get('margins', 'No definido')}")
+    else:
+        st.caption("Falta inicializar las semillas de formato estáticas. Se aplicarán valores APA 7 por defecto.")
     
-    st.markdown("### Fases Detectadas")
-    for fase in propuesta:
-        st.markdown(f"- **{fase['titulo']}**: {fase['descripcion']}")
-        
+    # 2. Checklist de Heurísticas Extraídas
+    st.markdown("### Heurísticas Críticas Detectadas")
+    
+    limite = analisis.get("limite_palabras")
+    st.markdown(f"**Límite de palabras:** {limite if limite else 'No especificado en el documento'}")
+    
+    fuentes = analisis.get("cantidad_fuentes_minima")
+    st.markdown(f"**Mínimo de referencias:** {fuentes if fuentes else 'No especificado'}")
+    
+    if analisis.get("penalizaciones_clave"):
+        st.markdown("**Advertencias de Penalización:**")
+        for pen in analisis["penalizaciones_clave"]:
+            st.warning(pen)
+            
+    if analisis.get("reglas_adicionales_detectadas"):
+        st.markdown("**Reglas Adicionales Encontradas:**")
+        for regla in analisis["reglas_adicionales_detectadas"]:
+            st.info(regla)
+
+    # 3. Propuesta de División del Trabajo / Fases
+    st.markdown("### Planificación Temporal Propuesta")
+    fases_propuestas = analisis.get("fases_propuestas", [])
+    
+    if requiere_fases and fases_propuestas:
+        for idx, fase in enumerate(fases_propuestas):
+            st.markdown(f"**Fase {idx+1}: {fase.get('titulo')}**")
+            st.caption(fase.get("descripcion", ""))
+    else:
+        st.markdown("- **Iteración 1: Entrega Única** (Estructura de entrega única activada o no se detectaron fases).")
+
     st.markdown("---")
     
     col1, col2 = st.columns([1, 4])
     with col1:
         if st.button("Atrás"):
-            # Limpiar propuesta para que recalcule si cambia algo
-            st.session_state["draft_project"].pop("ai_proposal", None) 
+            st.session_state["draft_project"].pop("ai_analysis", None)
             prev_step()
             st.rerun()
     with col2:
-        if st.button("Confirmar y Crear Proyecto", type="primary"):
-            with st.spinner("Ensamblando base de datos..."):
-                formato_seleccionado = db.query(FormatTemplate).filter_by(name=st.session_state["draft_project"]["format"]).first()
+        if st.button("Confirmar y Finalizar Creación", type="primary"):
+            with st.spinner("Registrando proyecto y asignando tareas..."):
                 
-                # Inyección del equipo en la metadata del proyecto
+                formato_db = db.query(FormatTemplate).filter_by(name=formato_nombre).first()
+                
                 metadata = {
                     "team_ids": st.session_state["draft_project"]["team_ids"],
                     "is_solo": st.session_state["draft_project"]["is_solo"]
@@ -189,14 +224,15 @@ elif st.session_state["wizard_step"] == 3:
                 nuevo_proyecto = Project(
                     title=st.session_state["draft_project"]["title"],
                     course=st.session_state["draft_project"]["course"],
-                    format_id=formato_seleccionado.id if formato_seleccionado else None,
+                    format_id=formato_db.id if formato_db else None,
                     project_metadata=metadata,
-                    project_heuristics=st.session_state["draft_project"].get("ai_heuristics", {})
+                    project_heuristics=analisis
                 )
                 db.add(nuevo_proyecto)
                 db.commit()
                 db.refresh(nuevo_proyecto)
                 
+                # Mover el archivo de la carpeta temporal a la definitiva
                 if "context_file" in st.session_state["draft_project"]:
                     old_path = st.session_state["draft_project"]["context_file"]["path"]
                     filename = st.session_state["draft_project"]["context_file"]["name"]
@@ -212,21 +248,51 @@ elif st.session_state["wizard_step"] == 3:
                         file_path=final_path,
                         file_type="context_rubric",
                         extracted_text=st.session_state["draft_project"]["context_file"]["extracted_text"],
-                        processed_data=st.session_state["draft_project"].get("ai_heuristics", {})
+                        processed_data=analisis
                     )
                     db.add(nuevo_archivo)
                 
-                for fase in propuesta:
+                # Generación de la estructura del árbol de tareas basado en el análisis
+                if requiere_fases and fases_propuestas:
+                    for fase in fases_propuestas:
+                        nueva_iteracion = Iteration(
+                            project_id=nuevo_proyecto.id,
+                            title=fase.get("titulo", "Fase")
+                        )
+                        db.add(nueva_iteracion)
+                        db.commit()
+                        db.refresh(nueva_iteracion)
+                        
+                        # Generar tareas base automáticas para cada fase del proyecto
+                        for sec in analisis.get("secciones_obligatorias", ["Introducción", "Desarrollo", "Conclusiones"]):
+                            nueva_tarea = Task(
+                                iteration_id=nueva_iteracion.id,
+                                title=f"{sec} ({fase.get('titulo')})",
+                                assignee_id=st.session_state["user_id"] if metadata["is_solo"] else None
+                            )
+                            db.add(nueva_tarea)
+                else:
                     nueva_iteracion = Iteration(
                         project_id=nuevo_proyecto.id,
-                        title=fase["titulo"]
+                        title="Iteración 1: Entrega Final"
                     )
                     db.add(nueva_iteracion)
+                    db.commit()
+                    db.refresh(nueva_iteracion)
+                    
+                    for sec in analisis.get("secciones_obligatorias", ["Introducción", "Desarrollo", "Conclusiones"]):
+                        nueva_tarea = Task(
+                            iteration_id=nueva_iteracion.id,
+                            title=sec,
+                            assignee_id=st.session_state["user_id"] if metadata["is_solo"] else None
+                        )
+                        db.add(nueva_tarea)
                 
                 db.commit()
                 
-                st.session_state["wizard_step"] = 1
-                st.session_state["draft_project"] = {}
+                # Limpieza de estados del Wizard
+                st.session_state.pop("wizard_step", None)
+                st.session_state.pop("draft_project", None)
                 st.session_state["team_inputs"] = [""]
                 st.session_state["current_project_id"] = nuevo_proyecto.id
                 

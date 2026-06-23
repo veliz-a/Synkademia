@@ -1,8 +1,6 @@
 import json
 from typing import Optional, List
-
 from pydantic import BaseModel, Field
-
 from src.llm.ai_client import chat
 
 # ==========================================
