@@ -32,7 +32,8 @@ def main():
             login_user = st.text_input("Usuario", key="login_input")
             if st.button("Ingresar"):
                 if login_user and login(login_user):
-                    st.rerun()
+                    # Redirección automática al Dashboard
+                    st.switch_page("pages/1_Dashboard.py")
                 else:
                     st.error("Usuario no encontrado.")
                     
@@ -41,7 +42,8 @@ def main():
             if st.button("Crear Cuenta"):
                 if reg_user and register(reg_user):
                     st.success("Cuenta creada exitosamente.")
-                    st.rerun()
+                    # Redirección automática al Dashboard
+                    st.switch_page("pages/1_Dashboard.py")
                 else:
                     st.error("El usuario ya existe o el campo está vacío.")
     else:
