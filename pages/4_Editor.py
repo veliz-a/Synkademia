@@ -1,6 +1,6 @@
 import streamlit as st
 from src.database import get_session, Project, Task
-from src.ai_client import revisar_coherencia_texto
+from src.llm.ai_client import revisar_coherencia_texto
 
 st.set_page_config(page_title="Editor - Synkademia", layout="wide")
 

@@ -1,11 +1,16 @@
 import os
 from datetime import datetime
-from typing import List, Optional
-from sqlalchemy import create_engine, String, Text, ForeignKey, DateTime
+from typing import List, Optional, Any
+from sqlalchemy import create_engine, String, Text, ForeignKey, DateTime, JSON
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(BASE_DIR, "synkademia.db")
+DB_DIR = os.path.join(BASE_DIR, 'data', 'db')
+
+# Crea las carpetas si no existen
+os.makedirs(DB_DIR, exist_ok=True) 
+
+DB_PATH = os.path.join(DB_DIR, "synkademia.db")
 engine = create_engine(f"sqlite:///{DB_PATH}", echo=False)
 
 class Base(DeclarativeBase):
@@ -28,25 +33,35 @@ class Project(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     title: Mapped[str] = mapped_column(String)
     course: Mapped[str] = mapped_column(String)
-    format_style: Mapped[str] = mapped_column(String, default="APA 7")
-    institution: Mapped[Optional[str]] = mapped_column(String) # Requerido para portadas
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    
+    format_id: Mapped[Optional[int]] = mapped_column(ForeignKey("format_templates.id"))
+    project_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    
+    # Consolidado de reglas del juego extraídas y verificadas por el equipo
+    project_heuristics: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
-    # Relaciones
-    contexts: Mapped[List["ProjectContext"]] = relationship(back_populates="project", cascade="all, delete-orphan")
+    format: Mapped[Optional["FormatTemplate"]] = relationship(back_populates="projects")
+    files: Mapped[List["ProjectFile"]] = relationship(back_populates="project", cascade="all, delete-orphan")
     iterations: Mapped[List["Iteration"]] = relationship(back_populates="project", cascade="all, delete-orphan")
 
-class ProjectContext(Base):
-    """Almacena la base de conocimiento empírica (sílabos, rúbricas, papers) para la IA."""
-    __tablename__ = "project_contexts"
+class ProjectFile(Base):
+    __tablename__ = "project_files"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"))
+    
     filename: Mapped[str] = mapped_column(String)
-    extracted_text: Mapped[str] = mapped_column(Text) # El texto crudo que consumirá Gemini
+    file_path: Mapped[str] = mapped_column(String) 
+    file_type: Mapped[str] = mapped_column(String) 
+    extracted_text: Mapped[Optional[str]] = mapped_column(Text) 
+    
+    # NUEVO: Estructura JSON con las heurísticas extraídas específicamente de este archivo
+    processed_data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    
     uploaded_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    project: Mapped["Project"] = relationship(back_populates="contexts")
+    project: Mapped["Project"] = relationship(back_populates="files")
 
 class Iteration(Base):
     """Agrupa las tareas en fases lógicas (ej. 'Iteración 1: Estado del Arte')."""
@@ -88,6 +103,20 @@ class Snapshot(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     iteration: Mapped["Iteration"] = relationship(back_populates="snapshots")
+
+class FormatTemplate(Base):
+    """Catálogo maestro de formatos de redacción (APA 7, IEEE, etc.)."""
+    __tablename__ = "format_templates"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String, unique=True)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    
+    # Almacena el diccionario de reglas. 
+    # Ej: {"font": "Times New Roman 12pt", "h1": "Centrado Negrita", "margins": "2.54cm"}
+    style_rules: Mapped[dict[str, Any]] = mapped_column(JSON)
+    
+    projects: Mapped[List["Project"]] = relationship(back_populates="format")
 
 def init_db():
     Base.metadata.create_all(bind=engine)

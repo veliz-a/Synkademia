@@ -2,5 +2,9 @@
   {
     "type": "sqlite",
     "path": "/home/node-vault07/projects/Synkademia/synkademia.db"
+  },
+  {
+    "type": "sqlite",
+    "path": "/home/node-vault07/projects/Synkademia/data/db/synkademia.db"
   }
 ]
