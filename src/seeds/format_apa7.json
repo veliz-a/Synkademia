@@ -1,0 +1,25 @@
+{
+  "name": "APA 7",
+  "description": "Estándar oficial de la American Psychological Association, 7ma edición.",
+  "style_rules": {
+    "font": "Times New Roman 12pt",
+    "margins": "2.54cm (1 pulgada) en todos los lados",
+    "line_spacing": "Doble (2.0)",
+    "alignment": "Alineado a la izquierda",
+    "paragraph_indentation": "Primera línea con sangría de 1.27cm (0.5 pulgadas)",
+    "page_numbers": "Esquina superior derecha",
+    "headings": {
+      "h1": "Centrado, Negrita, Title Case",
+      "h2": "Alineado a la izquierda, Negrita, Title Case",
+      "h3": "Alineado a la izquierda, Negrita Cursiva, Title Case"
+    },
+    "tables_and_figures": {
+      "number": "Negrita (ej. Tabla 1)",
+      "title": "Cursiva debajo del número",
+      "spacing": "Doble espacio"
+    },
+    "references": {
+      "indentation": "Sangría francesa de 1.27cm (0.5 pulgadas)"
+    }
+  }
+}

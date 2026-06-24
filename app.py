@@ -1,6 +1,7 @@
 import streamlit as st
+import json
 import os
-from src.database import init_db
+from src.database import init_db, get_session, FormatTemplate
 from src.auth import login, register, logout
 
 st.set_page_config(page_title="Synkademia", layout="centered")
@@ -53,6 +54,27 @@ def main():
         if st.button("Cerrar Sesión"):
             logout()
             st.rerun()
+
+def seed_formatos():
+    db = next(get_session())
+    formato_existente = db.query(FormatTemplate).filter_by(name="APA 7").first()
+    
+    if not formato_existente:
+        ruta_seed = os.path.join(os.path.dirname(__file__), "src", "seeds", "format_apa7.json")
+        try:
+            with open(ruta_seed, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                
+            nuevo_formato = FormatTemplate(
+                name=data["name"],
+                description=data["description"],
+                style_rules=data["style_rules"]
+            )
+            db.add(nuevo_formato)
+            db.commit()
+            print("Semilla de APA 7 cargada exitosamente.")
+        except FileNotFoundError:
+            print(f"No se encontró el archivo seed en: {ruta_seed}")
 
 if __name__ == "__main__":
     main()

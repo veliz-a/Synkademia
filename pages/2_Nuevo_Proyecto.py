@@ -172,23 +172,41 @@ elif st.session_state["wizard_step"] == 3:
     else:
         st.caption("Falta inicializar las semillas de formato estáticas. Se aplicarán valores APA 7 por defecto.")
     
-    # 2. Checklist de Heurísticas Extraídas
-    st.markdown("### Heurísticas Críticas Detectadas")
-    
-    limite = analisis.get("limite_palabras")
-    st.markdown(f"**Límite de palabras:** {limite if limite else 'No especificado en el documento'}")
-    
-    fuentes = analisis.get("cantidad_fuentes_minima")
-    st.markdown(f"**Mínimo de referencias:** {fuentes if fuentes else 'No especificado'}")
-    
+    # 2. Heurísticas detectadas (solo las que tienen valor)
+    st.markdown("### Heurísticas Detectadas")
+
+    detectado = []
+    if analisis.get("tipo_trabajo"):
+        detectado.append(f"**Modalidad:** {analisis['tipo_trabajo'].capitalize()}")
+    if analisis.get("cantidad_integrantes_max"):
+        detectado.append(f"**Integrantes por grupo:** {analisis['cantidad_integrantes_max']}")
+    if analisis.get("limite_palabras"):
+        detectado.append(f"**Límite de palabras:** {analisis['limite_palabras']}")
+    if analisis.get("limite_paginas"):
+        detectado.append(f"**Límite de páginas:** {analisis['limite_paginas']}")
+    if analisis.get("cantidad_fuentes_minima"):
+        detectado.append(f"**Mínimo de fuentes:** {analisis['cantidad_fuentes_minima']}")
+    if analisis.get("formato_citas"):
+        detectado.append(f"**Formato de citas:** {analisis['formato_citas']}")
+    if analisis.get("criterios_evaluacion"):
+        detectado.append(f"**Criterios:** {', '.join(analisis['criterios_evaluacion'])}")
+    if analisis.get("nota_minima_aprobatoria"):
+        detectado.append(f"**Nota mínima:** {analisis['nota_minima_aprobatoria']}")
+
+    for item in detectado:
+        st.markdown(f"- {item}")
+
+    if not detectado:
+        st.caption("No se detectaron heurísticas cuantificables en el documento.")
+
     if analisis.get("penalizaciones_clave"):
-        st.markdown("**Advertencias de Penalización:**")
+        st.markdown("**Penalizaciones:**")
         for pen in analisis["penalizaciones_clave"]:
             st.warning(pen)
-            
-    if analisis.get("reglas_adicionales_detectadas"):
-        st.markdown("**Reglas Adicionales Encontradas:**")
-        for regla in analisis["reglas_adicionales_detectadas"]:
+
+    if analisis.get("reglas_adicionales"):
+        st.markdown("**Reglas del trabajo:**")
+        for regla in analisis["reglas_adicionales"]:
             st.info(regla)
 
     # 3. Propuesta de División del Trabajo / Fases
@@ -252,9 +270,32 @@ elif st.session_state["wizard_step"] == 3:
                     )
                     db.add(nuevo_archivo)
                 
-                # Generación de la estructura del árbol de tareas basado en el análisis
+                # Distribución de tareas con round-robin sobre integrantes
+                from itertools import cycle
+
+                team_ids = metadata["team_ids"]
+                assignee_cycle = cycle(team_ids)
+
+                criterios     = analisis.get("criterios_evaluacion") or []
+                criterios_tipo = analisis.get("criterios_tipo") or {}
+                pesos         = analisis.get("pesos_evaluacion") or {}
+                secciones     = analisis.get("secciones_obligatorias") or ["Introducción", "Desarrollo", "Conclusiones"]
+
+                def items_fase(es_ultima: bool) -> list:
+                    # Última fase → criterios de evaluación; intermedias → secciones del documento
+                    if es_ultima and criterios:
+                        return [
+                            {
+                                "titulo": c,
+                                "instruccion": f"Tipo: {criterios_tipo.get(c, 'No especificado')} — Peso: {pesos.get(c, '?')}%"
+                            }
+                            for c in criterios
+                        ]
+                    return [{"titulo": s, "instruccion": None} for s in secciones]
+
                 if requiere_fases and fases_propuestas:
-                    for fase in fases_propuestas:
+                    for i, fase in enumerate(fases_propuestas):
+                        es_ultima = (i == len(fases_propuestas) - 1)
                         nueva_iteracion = Iteration(
                             project_id=nuevo_proyecto.id,
                             title=fase.get("titulo", "Fase")
@@ -262,15 +303,14 @@ elif st.session_state["wizard_step"] == 3:
                         db.add(nueva_iteracion)
                         db.commit()
                         db.refresh(nueva_iteracion)
-                        
-                        # Generar tareas base automáticas para cada fase del proyecto
-                        for sec in analisis.get("secciones_obligatorias", ["Introducción", "Desarrollo", "Conclusiones"]):
-                            nueva_tarea = Task(
+
+                        for item in items_fase(es_ultima):
+                            db.add(Task(
                                 iteration_id=nueva_iteracion.id,
-                                title=f"{sec} ({fase.get('titulo')})",
-                                assignee_id=st.session_state["user_id"] if metadata["is_solo"] else None
-                            )
-                            db.add(nueva_tarea)
+                                title=item["titulo"],
+                                ai_instructions=item["instruccion"],
+                                assignee_id=next(assignee_cycle)
+                            ))
                 else:
                     nueva_iteracion = Iteration(
                         project_id=nuevo_proyecto.id,
@@ -279,14 +319,16 @@ elif st.session_state["wizard_step"] == 3:
                     db.add(nueva_iteracion)
                     db.commit()
                     db.refresh(nueva_iteracion)
-                    
-                    for sec in analisis.get("secciones_obligatorias", ["Introducción", "Desarrollo", "Conclusiones"]):
-                        nueva_tarea = Task(
+
+                    # Sin fases: si hay criterios los usamos directamente, si no, secciones
+                    items = items_fase(es_ultima=True)
+                    for item in items:
+                        db.add(Task(
                             iteration_id=nueva_iteracion.id,
-                            title=sec,
-                            assignee_id=st.session_state["user_id"] if metadata["is_solo"] else None
-                        )
-                        db.add(nueva_tarea)
+                            title=item["titulo"],
+                            ai_instructions=item["instruccion"],
+                            assignee_id=next(assignee_cycle)
+                        ))
                 
                 db.commit()
                 

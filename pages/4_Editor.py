@@ -29,18 +29,17 @@ if not proyecto:
 # Inyección de estilos CSS para simular la hoja A4 y el look editorial limpio
 st.markdown("""
     <style>
-    /* Contenedor que emula una hoja de papel A4 */
-    .a4-page {
+    /* El textarea ES la hoja A4 */
+    .stTextArea textarea {
         background-color: #FFFFFF;
-        max-width: 800px;
-        margin: 0 auto;
-        padding: 50px 60px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-        border: 1px solid #EAEAEA;
-        min-height: 1000px;
         font-family: 'Times New Roman', Times, serif;
+        font-size: 12pt;
+        line-height: 1.8;
+        border: 1px solid #EAEAEA !important;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        padding: 40px 50px !important;
+        min-height: 900px;
     }
-    /* Estilos para el panel de control lateral */
     .task-highlight-owner {
         background-color: #F0F7F4;
         border-left: 4px solid #000000;
@@ -111,63 +110,57 @@ with col_navegacion:
         st.session_state["menu_ia_activo"] = True
         
         # Opciones fijas controladas desde backend (heuristias.py)
-        opcion_auditoria = st.selectbox(
-            "Selecciona una opcion",
-            [
-                "Verificar consistencia con la Rúbrica",
-                "Validar Citación y Estilo Editorial (APA 7)",
-                "Analizar estructura de párrafos y coherencia"
-            ]
-        )
-        
+        OPCIONES_AUDITORIA = {
+            "Contrastar con Rúbrica": "rubrica",
+            "Revisar Estructura y Coherencia": "estructura",
+            "Verificar Citas y Formato": "citas",
+        }
+
+        opcion_auditoria = st.selectbox("Tipo de auditoría", list(OPCIONES_AUDITORIA.keys()))
+
         if st.button("Ejecutar Análisis", use_container_width=True):
             if tarea_activa.content:
-                with st.spinner("El auditor local está analizando el bloque..."):
-                    # Se inyectan las heurísticas guardadas en el proyecto para realizar el cotejo analítico
-                    resultado = revisar_coherencia_texto(
-                        texto=str(tarea_activa.content), 
+                with st.spinner("Analizando..."):
+                    st.session_state["resultado_auditoria"] = revisar_coherencia_texto(
+                        texto=str(tarea_activa.content),
+                        opcion=OPCIONES_AUDITORIA[opcion_auditoria],
+                        tarea_titulo=tarea_activa.title,
                         project_heuristics=proyecto.project_heuristics
                     )
-                st.markdown("**Resultado del Auditor:**")
-                st.info(resultado)
             else:
                 st.warning("El lienzo actual está vacío. Añade contenido para auditar.")
 
 with col_lienzo:
-    # Simulación visual de la hoja A4 sobre el lienzo de Streamlit
-    st.markdown('<div class="a4-page">', unsafe_allow_html=True)
-    
     st.markdown(f"### {tarea_activa.title}")
-    st.caption("Escribe el contenido fluido de la sección. Para insertar tablas o imágenes, utiliza los bloques de inserción del menú inferior.")
-    
+    st.caption("Escribe el contenido de la sección. Usa los botones inferiores para insertar tablas o imágenes.")
+
     contenido_input = st.text_area(
         label="Lienzo de texto",
         value=tarea_activa.content if tarea_activa.content else "",
-        height=600,
+        height=800,
         disabled=modo_lectura,
         label_visibility="collapsed",
         key=f"text_area_{tarea_activa.id}"
     )
-    
-    # Bloque de herramientas de inserción estructural para estudiantes comunes
+
     if not modo_lectura:
         col_btn1, col_btn2, col_save = st.columns([1, 1, 2])
         with col_btn1:
             if st.button("Insertar Tabla Base", use_container_width=True):
-                # Inyecta un bloque limpio que el ensamblador final interpretará como tabla nativa de Word
                 contenido_input += "\n\n[ESTRUCTURA_TABLA: 3 Columnas, 2 Filas]\n\n"
                 st.rerun()
         with col_btn2:
             if st.button("Insertar Imagen", use_container_width=True):
-                # Inyecta un bloque de marcador que el ensamblador vinculará con los archivos subidos
                 contenido_input += "\n\n[ESTRUCTURA_IMAGEN: nombre_archivo.png]\n\n"
                 st.rerun()
-                
         with col_save:
             if st.button("Guardar Cambios en Servidor", type="primary", use_container_width=True):
                 tarea_activa.content = contenido_input
                 db.commit()
                 st.success("Progreso consolidado de forma segura.")
                 st.rerun()
-                
-    st.markdown('</div>', unsafe_allow_html=True)
+
+if st.session_state.get("resultado_auditoria"):
+    st.markdown("---")
+    st.markdown("### Resultado del Auditor")
+    st.info(st.session_state["resultado_auditoria"])
